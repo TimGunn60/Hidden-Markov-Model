@@ -21,16 +21,21 @@ class GaussianHMM:
         Type of covariance parameters ('full', 'diag')
     min_covar : float, default=1e-3
         Minimum value for covariance regularization
+    sticky_param : float, default=0.0
+        Sticky HMM parameter to encourage regime persistence.
+        Higher values such as 0.5-1.0 make states more persistent.
+    Set to 0.0 for standard HMM.
     random_state : int, default=42
         Random seed for reproducibility
     """
 
-    def __init__(self, n_states=3, n_iter=100, tol=1e-4,  covariance_type='full', min_covar=1e-3, random_state=42):
+    def __init__(self, n_states=3, n_iter=100, tol=1e-4,  covariance_type='full', min_covar=1e-3, sticky_param=0.0, random_state=42):
         self.n_states = n_states
         self.n_iter = n_iter
         self.tol = tol
         self.covariance_type = covariance_type
         self.min_covar = min_covar
+        self.sticky_param = sticky_param
         self.random_state = random_state
 
         #Model parameters (to be learned)
@@ -233,7 +238,7 @@ class GaussianHMM:
     
     def update_parameters(self, X, gamma, xi):
         """
-        Update HMM parameters (M-step of Baum-Welch) with smoothing.
+        Update HMM parameters (M-step of Baum-Welch) with smoothing and sticky bias.
 
         """
 
@@ -246,6 +251,11 @@ class GaussianHMM:
         numerator = np.sum(xi, axis=0) + 1e-10
         denominator = np.sum(gamma[:-1], axis=0, keepdims=True).T + 1e-10 * self.n_states
         self.trans_mat = numerator / denominator
+
+        #Apply sticky HMM bias to encourage regime persistence
+        if self.sticky_param > 0:
+            for i in range(self.n_states):
+                self.trans_mat[i, i] += self.sticky_param
 
         #Normalize to ensure rows sum to 1
         self.trans_mat /= self.trans_mat.sum(axis=1, keepdims=True)
@@ -273,9 +283,11 @@ class GaussianHMM:
         """Compute log-likelihood of the observations."""
         return logsumexp(log_alpha[-1])
 
-    def fit(self, X):
+    def fit(self, X, n_restarts=1):
         """
         Train the HMM using the Baum-Welch (EM) algorithm.
+
+        Multiple restarts help avoid local optima in the likelihood surface.
         
         Parameters
         ----------
@@ -288,41 +300,75 @@ class GaussianHMM:
             Returns self for method chaining
         """
         X = np.atleast_2d(X)
-
-        #Standardize features
+    
+        # Standardize features (do this once, before restarts)
         X_std = self.standardize_features(X, fit=True)
+    
+        # Track best model across restarts
+        best_log_likelihood = -np.inf
+        best_params = None
 
-        #Initialize parameters
-        self.initialize_parameters(X_std)
+        for restart in range(n_restarts):
+            #Change random seed for each restart
+            np.random.seed(self.random_state + restart)
 
-        #Run Baum-Welch iterations
-        prev_log_likelihood = -np.inf
+            #Initialize parameters randomly
+            self.initialize_parameters(X_std)
 
-        for i in range(self.n_iter):
-            #E-step: Compute emission probabilities in log space
-            log_emission_probs = self.compute_log_emission_probs(X_std)
+            #Run Baum-Welch iterations for this restart
+            prev_log_likelihood = -np.inf
+            restart_history = []
 
-            # E-step: Compute gamma and xi
-            gamma, xi = self.compute_gamma_xi_log(log_emission_probs)
+            for i in range(self.n_iter):
+                #E-step: Compute emission probabilities in log space
+                log_emission_probs = self.compute_log_emission_probs(X_std)
 
-            #M-step: Update parameters
-            self.update_parameters(X_std, gamma, xi)
+                # E-step: Compute gamma and xi
+                gamma, xi = self.compute_gamma_xi_log(log_emission_probs)
 
-            #Compute log-likelihood for convergence check
-            log_alpha = self.forward_log(log_emission_probs)
-            log_likelihood = self.compute_log_likelihood(log_alpha)
-            self.log_likelihood_history.append(log_likelihood)
+                #M-step: Update parameters
+                self.update_parameters(X_std, gamma, xi)
 
-            #Check convergence
-            improvement = log_likelihood - prev_log_likelihood
-            if i > 0 and abs(improvement) < self.tol:
-                self.converged = True
-                break
+                #Compute log-likelihood for convergence check
+                log_alpha = self.forward_log(log_emission_probs)
+                log_likelihood = self.compute_log_likelihood(log_alpha)
+                restart_history.append(log_likelihood)
 
-            prev_log_likelihood = log_likelihood
+                #Check convergence
+                improvement = log_likelihood - prev_log_likelihood
 
-        if not self.converged:
-            print("Baum-Welch did not converge. Consider increasing n_iter")
+                if i > 0 and abs(improvement) < self.tol:
+                    self.converged = True
+                    break
+
+                prev_log_likelihood = log_likelihood
+
+            if not self.converged:
+                print("Baum-Welch did not converge. Consider increasing n_iter")
+
+            #Check if this restart produced a better model
+            final_log_likelihood = restart_history[-1]
+
+            if final_log_likelihood > best_log_likelihood:
+                best_log_likelihood = final_log_likelihood
+                # Save the best parameters
+                best_params = {
+                'transmat': self.trans_mat.copy(),
+                'means': self.means.copy(),
+                'covars': self.covars.copy(),
+                'startprob': self.startprobs.copy(),
+                'history': restart_history.copy(),
+                'converged': self.converged
+                }
+
+        # Restore the best parameters from all restarts
+        if best_params is not None:
+            self.trans_mat = best_params['transmat']
+            self.means = best_params['means']
+            self.covars = best_params['covars']
+            self.startprobs = best_params['startprob']
+            self.log_likelihood_history_ = best_params['history']
+            self.converged = best_params['converged']
 
         return self
     
