@@ -151,8 +151,8 @@ def compare_models(models_dict, X_train, X_test=None):
             'train_log_likelihood': model.score(X_train),
             'aic': compute_aic(model, X_train),
             'bic': compute_bic(model, X_train),
-            'converged': model.converged_,
-            'n_iterations': len(model.log_likelihood_history_)
+            'converged': model.converged,
+            'n_iterations': len(model.log_likelihood_history)
         }
 
         if X_test is not None:

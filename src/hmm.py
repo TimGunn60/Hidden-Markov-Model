@@ -277,7 +277,7 @@ class GaussianHMM:
 
 
         #Add regularization
-        self._regularize_covariances()
+        self.regularize_covariances()
 
     def compute_log_likelihood(self, log_alpha):
         """Compute log-likelihood of the observations."""
@@ -300,7 +300,11 @@ class GaussianHMM:
             Returns self for method chaining
         """
         X = np.atleast_2d(X)
-    
+
+        #Reset training history
+        self.log_likelihood_history = [] 
+        self.converged = False
+
         # Standardize features (do this once, before restarts)
         X_std = self.standardize_features(X, fit=True)
     
@@ -367,7 +371,7 @@ class GaussianHMM:
             self.means = best_params['means']
             self.covars = best_params['covars']
             self.startprobs = best_params['startprob']
-            self.log_likelihood_history_ = best_params['history']
+            self.log_likelihood_history= best_params['history']
             self.converged = best_params['converged']
 
         return self
@@ -411,7 +415,7 @@ class GaussianHMM:
             for j in range(self.n_states):
                 temp = log_delta[t-1] + log_trans_mat[:, j]
                 psi[t, j] = np.argmax(temp)
-                log_delta[t, j] = np.max(temp) * log_emission_probs[j, t]
+                log_delta[t, j] = np.max(temp) + log_emission_probs[j, t]
         
         #Termination - backtrack to find most likely path
         states = np.zeros(n_samples, dtype=int)
@@ -439,7 +443,7 @@ class GaussianHMM:
         """
 
         X = np.atleast_2d(X)
-        X_std = self._standardize_features(X, fit=False)
+        X_std = self.standardize_features(X, fit=False)
         log_emission_probs = self.compute_log_emission_probs(X_std)
         state_probs, _ = self.compute_gamma_xi_log(log_emission_probs)
 
@@ -460,9 +464,9 @@ class GaussianHMM:
             Log-likelihood of the observations
         """
         X = np.atleast_2d(X)
-        X_std = self._standardize_features(X, fit=False)
-        log_emission_probs = self.compute_emission_probs(X_std)
-        log_alpha = self.forward(log_emission_probs)
+        X_std = self.standardize_features(X, fit=False)
+        log_emission_probs = self.compute_log_emission_probs(X_std)
+        log_alpha = self.forward_log(log_emission_probs)
         return self.compute_log_likelihood(log_alpha)
 
 
