@@ -15,7 +15,7 @@ By analyzing the joint distribution of asset returns and rolling volatility, the
 ---
 
 ## Empirical Results (SPY Analysis: 2018–2024)
-The model was trained on ~1,500 data points of SPY (S&P 500) data. It converged to three distinct economic "personalities":
+The model was trained on ~1,500 data points of SPY (S&P 500) data. It converged to three distinct economic regimes:
 
 Regime | Interpretation | Annual Return | Annual Volatility | Frequency |
 | :--- | :--- | :--- | :--- | :--- |
