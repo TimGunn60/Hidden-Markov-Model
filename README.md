@@ -51,7 +51,6 @@ Regime | Interpretation | Mean Annualized Return | Annualized Volatility | Frequ
 ---
 
 ## Visualizing Regime Performance
-The following analysis confirms that State 0 provides the highest risk-adjusted opportunity (Sharpe), while State 2 represents high-variance "coin-flip" conditions often seen during market panics.
 
 ![Regime Performance Analysis](regime_market_performance.png)
 
@@ -82,7 +81,7 @@ The repository is organized as a modular pipeline:
 
 ## Usage
 
-**1. Installation**
+**Installation**
 Clone the repository and install the required dependencies:
 ```bash
 git clone git@github.com:TimGunn60/Hidden-Markov-Model.git
