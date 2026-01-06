@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+from scipy import stats
 
 sns.set_style("darkgrid")
 plt.rcParams['figure.figsize'] = (12, 6)
@@ -368,7 +368,340 @@ def get_regime_transitions(states):
 
     return transition_count_df
 
+def compute_sharpe_ratio(returns, risk_free_rate=0.0, periods_per_year=252):
+    """
+    Compute annualized Sharpe ratio.
+    
+    Parameters
+    ----------
+    returns : array-like
+        Period returns (not cumulative)
+    risk_free_rate : float
+        Annual risk-free rate
+    periods_per_year : int
+        Trading periods per year (252 for daily, 12 for monthly)
+    
+    Returns
+    -------
+    sharpe : float
+    """
+    excess_returns = returns - risk_free_rate / periods_per_year
 
+    if np.std(excess_returns) == 0:
+        return 0.0
+    
+    sharpe = np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(periods_per_year)
+    return sharpe
+
+def compute_sortino_ratio(returns, risk_free_rate=0.0, periods_per_year=252):
+    """
+    Compute annualized Sortino ratio (penalizes downside volatility only).
+    """
+
+    excess_returns = returns - risk_free_rate / periods_per_year
+    downside_returns = excess_returns[excess_returns < 0]
+
+    if len(downside_returns) == 0 or np.std(downside_returns) == 0:
+        return 0.0
+    
+    downside_std = np.std(downside_returns)
+    sortino = np.mean(excess_returns) / downside_std * np.sqrt(periods_per_year)
+    return sortino
+
+def compute_max_drawdown(cumulative_returns):
+    """
+    Compute maximum drawdown from peak.
+    
+    Parameters
+    ----------
+    cumulative_returns : array-like
+        Cumulative returns series
+    
+    Returns
+    -------
+    max_dd : float
+        Maximum drawdown (positive number -> 0.25 = 25% drawdown)
+    """
+
+    cumulative_wealth = (1 + cumulative_returns)
+    running_max = np.maximum.accumulate(cumulative_wealth)
+    drawdown = (cumulative_wealth - running_max) / running_max
+    max_dd = np.abs(np.min(drawdown))
+    return max_dd
+
+def compute_calmar_ratio(returns, periods_per_year=252):
+    """
+    Compute Calmar ratio (annualized return / max drawdown).
+    """
+
+    cumulative_returns = np.cumprod(1 + returns) - 1
+    
+    max_dd = compute_max_drawdown(cumulative_returns)
+
+    if max_dd <= 0:
+        return 0.0
+    
+    annualized_return = np.mean(returns) * periods_per_year
+    calmar = annualized_return / max_dd
+
+    return calmar
+
+def compute_var(returns, confidence_level=0.95):
+    """
+    Compute Value at Risk at given confidence level.
+    
+    Parameters
+    ----------
+    returns : array-like
+        Period returns
+    confidence_level : float
+        Confidence level (e.g. 0.95 for 95%)
+    
+    Returns
+    -------
+    var : float
+        VaR (positive number representing loss)
+    """
+    var = np.abs(np.percentile(returns, (1 - confidence_level) * 100))
+    return var
+
+def compute_cvar(returns, confidence_level=0.95):
+    """
+    Compute Conditional Value at Risk (Expected Shortfall).
+    Average loss beyond VaR threshold.
+    """
+    var_threshold = -compute_var(returns, confidence_level)
+    cvar = np.abs(np.mean(returns[returns <= var_threshold]))
+    return cvar
+
+def backtest_regime_strategy(model, X, returns, dates, regime_positions=None,transaction_cost=0.001):
+    """
+    Backtest a regime-based trading strategy.
+    
+    Parameters
+    ----------
+    model : GaussianHMM
+        Trained HMM model
+    X : array-like, shape (n_samples, n_features)
+        Features for regime detection
+    returns : array-like, shape (n_samples,)
+        Asset returns to trade on
+    dates : array-like
+        Date index
+    regime_positions : dict, optional
+        Dictionary mapping regime number to position
+        Example: {0: 1.0, 1: 0.0, 2: -1.0} for long/cash/short
+        Default: regime 0 = long, others = cash
+    transaction_cost : float
+        Cost per trade as fraction (e.g. 0.001 = 0.1%)
+    
+    Returns
+    -------
+    results : dict
+        Dictionary containing strategy returns, positions, metrics
+    """
+    states = model.predict(X)
+    n_states = model.n_states
+
+    #Default positions: regime 0 long, others cash
+    if regime_positions is None:
+        regime_positions = {i: 1.0 if i == 0 else 0.0 for i in range(n_states)}
+
+    #Create position series based on predicted regimes
+    positions = np.array([regime_positions.get(s, 0.0) for s in states])
+
+    #Calculate strategy returns
+    strategy_returns = positions * returns
+
+    #Apply transaction costs when position changes
+    position_changes = np.abs(np.diff(positions, prepend=positions[0]))
+    transaction_costs = position_changes * transaction_cost
+    strategy_returns = strategy_returns - transaction_costs
+
+    #Calculate cumulative returns
+    cumulative_returns = np.cumprod(1 + strategy_returns) - 1
+    buy_hold_cumulative = np.cumprod(1 + returns) - 1
+
+    #Filter for active trading days to get an accurate win rate
+    active_days_mask = positions != 0
+    active_returns = strategy_returns[active_days_mask]
+
+    #Calculate win rate only on days with market exposure
+    if len(active_returns) > 0:
+        win_rate = np.sum(active_returns > 0) / len(active_returns)
+    else:
+        win_rate = 0.0
+
+    #Compute metrics
+    results = {
+        'dates': dates,
+        'states': states,
+        'positions': positions,
+        'strategy_returns': strategy_returns,
+        'cumulative_returns': cumulative_returns,
+        'buy_hold_cumulative': buy_hold_cumulative,
+        'total_return': cumulative_returns[-1],
+        'annualized_return': np.mean(strategy_returns) * 252,
+        'annualized_volatility': np.std(strategy_returns) * np.sqrt(252),
+        'sharpe_ratio': compute_sharpe_ratio(strategy_returns),
+        'sortino_ratio': compute_sortino_ratio(strategy_returns),
+        'max_drawdown': compute_max_drawdown(cumulative_returns),
+        'calmar_ratio': compute_calmar_ratio(strategy_returns),
+        'var_95': compute_var(strategy_returns, 0.95),
+        'cvar_95': compute_cvar(strategy_returns, 0.95),
+        'n_trades': np.sum(position_changes > 0),
+        'win_rate': win_rate
+    }
+    
+    return results
+
+def compare_strategies(results_dict):
+    """
+    Compare multiple backtest results.
+    
+    Parameters
+    ----------
+    results_dict : dict
+        Dictionary mapping strategy names to backtest results
+        Example: {'2-state': results1, '3-state': results2}
+    
+    Returns
+    -------
+    comparison : pd.DataFrame
+        Comparison table with key metrics
+    """
+    comparison = []
+
+    for name, results in results_dict.items():
+        comparison.append({
+            'strategy': name,
+            'total_return': results['total_return'],
+            'annualized_return': results['annualized_return'],
+            'annualized_volatility': results['annualized_volatility'],
+            'sharpe_ratio': results['sharpe_ratio'],
+            'sortino_ratio': results['sortino_ratio'],
+            'max_drawdown': results['max_drawdown'],
+            'calmar_ratio': results['calmar_ratio'],
+            'var_95': results['var_95'],
+            'cvar_95': results['cvar_95'],
+            'n_trades': results['n_trades'],
+            'win_rate': results['win_rate']
+        })
+    
+    df = pd.DataFrame(comparison)
+    df = df.sort_values('sharpe_ratio', ascending=False)
+
+    return df
+
+def plot_backtest_results(results, title='Strategy Performance', figsize=(14, 10)):
+    """
+    Comprehensive visualization of backtest results.
+    
+    Parameters
+    ----------
+    results : dict
+        Results from backtest_regime_strategy()
+    title : str
+        Plot title
+    figsize : tuple
+        Figure size
+    """    
+
+    fig, axes = plt.subplots(3, 1, figsize=figsize)
+    dates = results['dates']
+
+    #Panel 1: Cumulative returns
+    axes[0].plot(dates, results['cumulative_returns'], label='Strategy', linewidth=2, color='blue')
+    axes[0].plot(dates, results['buy_hold_cumulative'], label='Buy & Hold', linewidth=2, color='gray', alpha=0.7)
+    axes[0].set_ylabel('Cumulative Return', fontweight='bold')
+    axes[0].set_title(title, fontsize=14, fontweight='bold')
+    axes[0].legend(loc='best')
+    axes[0].grid(True, alpha=0.3)
+
+    #Panel 2: Positions by regime
+    colors = plt.cm.Set3(np.linspace(0, 1, len(np.unique(results['states']))))
+    for state in np.unique(results['states']):
+        mask = results['states'] == state
+        axes[1].scatter(dates[mask], results['positions'][mask], label=f'Regime {state}', alpha=0.6, color=colors[state])
+    axes[1].set_ylabel('Position', fontweight='bold')
+    axes[1].set_ylim([-1.2, 1.2])
+    axes[1].axhline(y=0, color='black', linestyle='--', alpha=0.3)
+    axes[1].legend(loc='best')
+    axes[1].grid(True, alpha=0.3)
+
+    #Panel 3: Rolling Sharpe ratio
+    window = min(60, len(results['strategy_returns']) // 5)
+    rolling_sharpe = pd.Series(results['strategy_returns']).rolling(window).apply(
+        lambda x: compute_sharpe_ratio(x.values) if len(x) == window else np.nan
+    )
+    axes[2].plot(dates, rolling_sharpe, linewidth=2, color='green')
+    axes[2].set_xlabel('Date', fontweight='bold')
+    axes[2].set_ylabel(f'Rolling Sharpe ({window}d)', fontweight='bold')
+    axes[2].axhline(y=0, color='black', linestyle='--', alpha=0.3)
+    axes[2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+def plot_regime_performance(results, asset_returns, figsize=(12, 6)):
+    """
+    Analyze performance by regime.
+    
+    Parameters
+    ----------
+    results : dict
+        Results from backtest_regime_strategy()
+    figsize : tuple
+        Figure size
+    
+    Returns
+    -------
+    regime_stats : pd.DataFrame
+        Performance statistics by regime
+    """
+
+    states = results['states']
+
+    regime_stats = []
+
+    for state in np.unique(states):
+        mask = states == state
+        regime_market_returns = asset_returns[mask]
+        
+        regime_stats.append({
+            'regime': state,
+            'count': np.sum(mask),
+            'mean_return': np.mean(regime_market_returns),
+            'volatility': np.std(regime_market_returns),
+            'sharpe': compute_sharpe_ratio(regime_market_returns),
+            'win_rate': np.sum(regime_market_returns > 0) / len(regime_market_returns),
+            'best_return': np.max(regime_market_returns),
+            'worst_return': np.min(regime_market_returns)
+        })
+
+    
+    df = pd.DataFrame(regime_stats)
+
+    #Visualization
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    #Mean returns by regime
+    axes[0].bar(df['regime'], df['mean_return'], color='steelblue', alpha=0.7)
+    axes[0].set_xlabel('Regime', fontweight='bold')
+    axes[0].set_ylabel('Mean Return', fontweight='bold')
+    axes[0].set_title('Average Returns by Regime', fontweight='bold')
+    axes[0].grid(True, alpha=0.3, axis='y')
+
+    #Sharpe ratio by regime
+    axes[1].bar(df['regime'], df['sharpe'], color='green', alpha=0.7)
+    axes[1].set_xlabel('Regime', fontweight='bold')
+    axes[1].set_ylabel('Sharpe Ratio', fontweight='bold')
+    axes[1].set_title('Sharpe Ratio by Regime', fontweight='bold')
+    axes[1].grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    return df, fig
 
 
 

@@ -1,8 +1,6 @@
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from src.hmm import GaussianHMM
-from src.evaluation import analyze_regimes, plot_regimes_on_price, plot_regime_probabilities, compute_aic, compute_bic
+from src.evaluation import analyze_regimes, plot_regimes_on_price, compute_aic, compute_bic
 from data.data import MarketDataLoader
 
 def run_analysis(ticker='SPY'):
