@@ -6,7 +6,7 @@ By analyzing the joint distribution of asset returns and rolling volatility, the
 
 ---
 
-## Key features 
+## Key Features 
 * **From-Scratch Implementation:** Built the core HMM engine (Baum-Welch and Viterbi) using `NumPy` and `SciPy` to ensure full control over transition dynamics and emission modeling.
 * Implemented all probability calculations in **log-space** using `logsumexp` to prevent floating-point underflow during the Forward-Backward pass on long historical datasets.
 * Integrated a `sticky_param` ($\kappa$) to the transition matrix. This regularizes the model to favor self-transitions, successfully suppressing "regime chatter" and ensuring inferred regimes exhibit temporal persistence suitable for downstream strategy evaluation.
@@ -17,7 +17,7 @@ By analyzing the joint distribution of asset returns and rolling volatility, the
 ---
 
 ## Strategy Backtest Results (SPY 2018–2024)
-**Backtest Assumptions**
+### Backtest Assumptions
 - Asset: SPY (daily data)
 - Strategy: Long exposure in the highest-return regime; cash otherwise
 - Transaction cost: 10 bps per position change
@@ -50,12 +50,24 @@ Regime | Interpretation | Mean Annualized Return | Annualized Volatility | Frequ
 
 ---
 
-### Visualizing Regime Performance
+## Visualizing Regime Performance
 The following analysis confirms that State 0 provides the highest risk-adjusted opportunity (Sharpe), while State 2 represents high-variance "coin-flip" conditions often seen during market panics.
 
 ![Regime Performance Analysis](regime_market_performance.png)
 
-### Strategic Insight:
+---
+
+## Visualizing Market Regimes
+To validate the model's unsupervised learning capabilities, the decoded state sequence is overlaid on historical price action. 
+
+![SPY Regime Overlay](regime_overlay.png)
+
+**Key Observations:**
+- **State 0 (Bull):** Shows long-term persistence during the 2021 recovery, validating the 'sticky' transition matrix.
+- **State 1 (Choppy):** Dominates the 2022 inflationary bear market, identifying a regime of elevated volatility and weak/negative price drift.
+- **State 2 (Crisis):** Precisely captures the high-volatility regime during the 2020 market drawdown.
+
+## Strategic Insight
 The model reveals that **45.6% of market history** is spent in a "Volatility Trap" (State 1), where the investor assumes double the risk of a Bull market for effectively zero expected return. State 2 corresponds to periods of extreme tail-risk events (e.g., March 2020) characterized by 68%+ annualized volatility.
 
 ---
@@ -68,21 +80,9 @@ The repository is organized as a modular pipeline:
 
 ---
 
-### Visualizing Market Regimes
-To validate the model's unsupervised learning capabilities, the decoded state sequence is overlaid on historical price action. 
+## Usage
 
-![SPY Regime Overlay](regime_overlay.png)
-
-**Key Observations:**
-- **State 0 (Bull):** Shows long-term persistence during the 2021 recovery, validating the 'sticky' transition matrix.
-- **State 1 (Choppy):** Dominates the 2022 inflationary bear market, correctly identifying a regime of high volatility with negative price drift.
-- **State 2 (Crisis):** Precisely captures the high-volatility regime during the 2020 market drawdown.
-
----
-
-### Usage
-
-### 1. Installation
+**1. Installation**
 Clone the repository and install the required dependencies:
 ```bash
 git clone git@github.com:TimGunn60/Hidden-Markov-Model.git
@@ -91,8 +91,11 @@ pip install -r requirements.txt
 ```
 
 To run a full regime-based backtest and generate evaluation plots:
+```bash
 python -m experiments.test_backtest
+```
 
+---
 
 ## Limitations and Future Work
 - Model parameters are trained on a fixed historical window (no walk-forward retraining).
